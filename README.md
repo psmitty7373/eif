@@ -1,0 +1,2 @@
+# eif - Evil Inject Finder
+The eif tool is designed to help you find evil injected malware.  Malware injected directly into a process using reflective dll injection typically will not exist on disk.  This tool is designed to help you find those evil injections!  Administrative rights are currently necessary to adequately examine the memory of running processes.  Some memory pages will be unreadable if marked as protected processes by the OS.
