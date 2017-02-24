@@ -624,15 +624,15 @@ int main(int argc, char* argv[])
 				wcout << "Analysing PID: " << it->first << " : " << it->second.pe32.szExeFile << endl;
 				if (it->second.integrityLevel == SECURITY_MANDATORY_SYSTEM_RID || it->second.integrityLevel == SECURITY_MANDATORY_SYSTEM_RID)
 					wcout << "ATTENTION! PID is protected!" << endl;
-				cout << "+" << string(152, '-') << "+" << endl;
-				cout << "|" << setw(13) << right << "Address" << " | " << setw(17) << left << "Permissions" << " | " << setw(13) << right << "Size" << " | " << setw(39) << left << "Module" << " | " << setw(2) << "MZ" << " | " << setw(3) << "DOS" << " | " << setw(4) << "Nops" << " | " << setw(4) << "Sigs" << " | " << setw(32) << "MD5" << " |" << endl;
-				cout << "+" << string(152, '-') << "+" << endl;
+				cout << "+" << string(153, '-') << "+" << endl;
+				cout << "|" << setw(13) << right << "Address" << " | " << setw(17) << left << "Permissions" << " | " << setw(13) << right << "Size" << " | " << setw(39) << left << "Module" << " | " << setw(3) << "MZ" << " | " << setw(3) << "DOS" << " | " << setw(4) << "Nops" << " | " << setw(4) << "Sigs" << " | " << setw(32) << "MD5" << " |" << endl;
+				cout << "+" << string(153, '-') << "+" << endl;
 				for (list<PAGE>::iterator it2 = it->second.pages.begin(); it2 != it->second.pages.end(); it2++) {
 					cout << "|" << setw(13) << right << hex << it2->pageAddress << " | " << setw(17) << left << it2->perm << " | " << setw(13) << right << convertBytes(it2->mbi.RegionSize) << " | ";
 					wcout << setw(39) << left << it2->module.substr(0, 39);
-					cout << " | " << setw(2) << it2->mz << " | " << setw(3) << it2->dos << " | " << setw(4) << it2->nops << " | " << setw(4) << it2->sigs << " | " << setw(32) << it2->md5 << " |" << endl;
+					cout << " | " << setw(3) << it2->mz << " | " << setw(3) << it2->dos << " | " << setw(4) << it2->nops << " | " << setw(4) << it2->sigs << " | " << setw(32) << it2->md5 << " |" << endl;
 				}
-				cout << "+" << string(152, '-') << "+" << endl << endl;
+				cout << "+" << string(153, '-') << "+" << endl << endl;
 			}
 			else if (sArgs.format == "CSV") {
 				cout << "PID,Page Address,Permissions,Region Size,Module,MZ,DOS,NOPs,Sigs,MD5" << endl;
