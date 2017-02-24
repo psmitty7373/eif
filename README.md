@@ -69,7 +69,9 @@ Invoke-Empire
 RSACryptoServiceProvider
 ```
 ##References
+```
 Thanks to Nikos Laleas, much of the initial python project was based on his project at:
 https://github.com/nccgroup/memaddressanalysis
 Based on ideas presented by aking1012
 https://github.com/aking1012/dc20
+```
