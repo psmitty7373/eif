@@ -523,10 +523,6 @@ int main(int argc, char* argv[])
 	HANDLE token;
 	ARG sArgs;
 	map<int, PROCESS> processes;
-	clog << "+------------------------------------------------+" << endl;
-	clog << "| Evil Inject Finder                             |" << endl;
-	clog << "| by: Phillip Smith                              |" << endl;
-	clog << "+------------------------------------------------+" << endl << endl;
 	//options parsing
 	sArgs.signatureMatch = false;
 	sArgs.moduleBacking = false;
@@ -545,6 +541,10 @@ int main(int argc, char* argv[])
 	if (parse.error())
 		return 1;
 	if (options[HELP]) {
+		clog << "+------------------------------------------------+" << endl;
+		clog << "| Evil Inject Finder                             |" << endl;
+		clog << "| by: Phillip Smith                              |" << endl;
+		clog << "+------------------------------------------------+" << endl << endl;
 		option::printUsage(std::cout, usage);
 		return 0;
 	}
