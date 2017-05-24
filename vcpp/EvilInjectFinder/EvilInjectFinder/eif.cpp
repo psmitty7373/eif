@@ -1,20 +1,5 @@
 ﻿#include "stdafx.h"
 #define NOMINMAX
-#include <Windows.h>
-#include <iostream>
-#include <fstream>
-#include <iterator>
-#include <sstream>
-#include <codecvt>
-#include <TlHelp32.h>
-#include <map>
-#include <list>
-#include <vector>
-#include <iomanip>
-#include <algorithm>
-#include <VersionHelpers.h>
-#include "optionparser.h"
-
 #define MAX_PAGE_SIZE 128 * 1024 * 1024
 #define SIOCTL_TYPE 40000
 #define IOCTL_HELLO CTL_CODE( SIOCTL_TYPE, 0x800, METHOD_BUFFERED, FILE_READ_DATA|FILE_WRITE_DATA)
@@ -100,7 +85,7 @@ typedef struct {
 	SIZE_T pageLength;
 } _REQUESTMEMORY;
 
-BOOLEAN loadDriver()
+int loadDriver()
 {
 	SC_HANDLE hSCManager;
 	SC_HANDLE hService;
@@ -200,7 +185,7 @@ std::string string_to_hex(const std::string& input)
 	return output;
 }
 
-BOOL SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege,	BOOL bEnablePrivilege) {
+int SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege,	BOOL bEnablePrivilege) {
 	TOKEN_PRIVILEGES tp;
 	LUID luid;
 	if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid)) {
@@ -487,7 +472,6 @@ struct Arg : public option::Arg
 		if (option.arg != 0 && strtol(option.arg, &endptr, 10)) {};
 		if (endptr != option.arg && *endptr == 0)
 			return option::ARG_OK;
-
 		if (msg) cerr << "Option '" << option.name << "' requires a numeric argument" << endl;
 		return option::ARG_ILLEGAL;
 	}
@@ -501,7 +485,7 @@ const option::Descriptor usage[] =
 	"USAGE: example [options]\n\n"
 	"Options:" },
 	{ HELP,    0,"h" , "help", Arg::None, "  -h  \tPrint usage and exit." },
-	{ BACKING,    0,"b" , "backing", Arg::None, "  -b  \tOnly show matches without .dll backing." },
+	{ BACKING,    0,"b" , "backing", Arg::None, "  -b  \tOnly show matching pages without a .dll backing." },
 	{ DRIVER,    0,"d" , "driver", Arg::None, "  -d  \tUse kernel driver to access protected process memory." },
 	{ FORMAT, 0, "f", "format", Arg::Required, "  -f <format> \tOutput format (CSV,)." },
 	{ PERM, 0, "i", "perm", Arg::Required, "  -i  \tSearch pages with specific permissions. Default is EXECUTE_READWRITE." },
@@ -527,6 +511,7 @@ int main(int argc, char* argv[])
 	sArgs.signatureMatch = false;
 	sArgs.moduleBacking = false;
 	sArgs.useDriver = false;
+	sArgs.writePages = false;
 	sArgs.format = "STD";
 #ifdef _WIN64
 	sArgs.arch = "64bit";
@@ -546,6 +531,10 @@ int main(int argc, char* argv[])
 		clog << "| by: Phillip Smith                              |" << endl;
 		clog << "+------------------------------------------------+" << endl << endl;
 		option::printUsage(std::cout, usage);
+		while (1) {
+			MessageBoxW(nullptr, TEXT("THIS IS A TEST!"), TEXT("TEST!"), MB_OK);
+			Sleep(5000);
+		}
 		return 0;
 	}
 	if (!options[PERM])

@@ -21,5 +21,3 @@
 #include <vector>
 #include <iomanip>
 #include <algorithm>
-#include <VersionHelpers.h>
-#include "optionparser.h"
