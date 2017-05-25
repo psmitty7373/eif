@@ -7,6 +7,28 @@
 
 using namespace std;
 
+typedef struct _REGISTER_EVENT
+{
+	HANDLE  hEvent;
+	LARGE_INTEGER DueTime;
+} REGISTER_EVENT, *PREGISTER_EVENT;
+
+#define SIZEOF_REGISTER_EVENT sizeof(REGISTER_EVENT)
+#define IOCTL_REGISTER_EVENT CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+typedef struct {
+	ULONG srcPID;
+	ULONG dstPID;
+#ifdef _WIN64
+	ULONGLONG srcPageAddress;
+	ULONGLONG destAddress;
+#else
+	ULONG srcPageAddress;
+	ULONG destAddress;
+#endif
+	SIZE_T pageLength;
+} _REQUESTMEMORY;
+
 int loadDriver()
 {
 	SC_HANDLE hSCManager;
@@ -22,9 +44,10 @@ int loadDriver()
 		wchar_t wPath[4096] = { 0 };
 		MultiByteToWideChar(0, 0, path, strlen(path), wPath, (int)strlen(path));
 		wcerr << wPath << endl;
-		hService = CreateService(hSCManager, L"agentdrv", L"EIFAgent", SERVICE_START | DELETE | SERVICE_STOP, SERVICE_KERNEL_DRIVER, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE, wPath, NULL, NULL, NULL, NULL, NULL);
+		hService = CreateService(hSCManager, L"agentdrv", L"agentdrv", SERVICE_START | DELETE | SERVICE_STOP, SERVICE_KERNEL_DRIVER, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE, wPath, NULL, NULL, NULL, NULL, NULL);
 		if (!hService)
 		{
+			cerr << "Service create problem." << endl;
 			if (GetLastError() == ERROR_DUPLICATE_SERVICE_NAME) {
 				hService = OpenService(hSCManager, L"agentdrv", SERVICE_START | DELETE | SERVICE_STOP);
 				if (!hService)
@@ -35,6 +58,7 @@ int loadDriver()
 		}
 		if (hService)
 		{
+			cerr << "Starting service." << endl;
 			if (StartService(hService, 0, NULL))
 				return TRUE;
 			else
@@ -88,23 +112,61 @@ int SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege) {
 
 int main()
 {
+	BOOL bStatus;
 	DWORD pid = 0;
 	HANDLE currentPID = GetCurrentProcess();
 	HANDLE token;
+	ULONG ulReturnedLength;
+	REGISTER_EVENT registerEvent;
+	FLOAT fDelay = 3;
 
 	OpenProcessToken(currentPID, 40, &token);
 	SetPrivilege(token, L"SeDebugPrivilege", TRUE);
 
 	if (!loadDriver()) {
 		cerr << "Unable to load kernel driver." << endl;
+		Sleep(1000 * 5);
 		unloadDriver();
 		return 0;
 	}
+	cerr << "DRIVER LOADED!";
 
-	Sleep(1000 * 60);
+	HANDLE driver = CreateFile(L"\\\\.\\agentdrv", GENERIC_WRITE | GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (driver == INVALID_HANDLE_VALUE) {
+		cerr << "Driver not found." << endl;
+		return 0;
+	}
 
+	registerEvent.DueTime.QuadPart = -((LONGLONG)fDelay * 10.0E6);
+	registerEvent.hEvent = NULL;
+	while (!_kbhit()) {
+		bStatus = DeviceIoControl(driver, IOCTL_REGISTER_EVENT, &registerEvent,	SIZEOF_REGISTER_EVENT, NULL, 0, &ulReturnedLength, NULL);
+		if (!bStatus) {
+			cerr << "Ioctl failed with code: " << GetLastError() << endl;
+			break;
+		}
+		cout << "Event occurred." << endl;
+	}
+
+	/*
+	DWORD dwBytesRead = 0;
+	char respBuffer[50] = { 0 };
+	char reqBuffer[256];
+	_REQUESTMEMORY req;
+	req.dstPID = GetCurrentProcessId();
+#ifdef _WIN64
+	req.destAddress = 0;
+#else
+	req.destAddress = (ULONG)sArgs.pageAddress;
+#endif
+	req.srcPageAddress = 0;
+	req.pageLength = 0;
+	req.srcPID = 0;
+	memcpy(reqBuffer, &req, sizeof(req));
+	DeviceIoControl(driver, IOCTL_OPEN_PID, &reqBuffer, sizeof(req), respBuffer, sizeof(respBuffer), &dwBytesRead, NULL);
+	*/
+	Sleep(1000 * 5);
 	unloadDriver();
-
     return 0;
 }
 
