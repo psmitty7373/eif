@@ -36,7 +36,7 @@ HANDLE WINAPI DetourCreateRemoteThread(HANDLE a, LPSECURITY_ATTRIBUTES b, SIZE_T
 {
 	FILE *file;
 	fopen_s(&file, "C:\\temp\\log.txt", "a+");
-	fprintf(file, "CALLED!\n");
+	fprintf(file, "CRT CALLED!\n");
 	fclose(file);
 	return fpCreateRemoteThread(a, b, c, d, e, f, g);
 }
@@ -45,7 +45,7 @@ HANDLE WINAPI DetourCreateRemoteThreadEx(HANDLE a, LPSECURITY_ATTRIBUTES b, SIZE
 {
 	FILE *file;
 	fopen_s(&file, "C:\\temp\\log.txt", "a+");
-	fprintf(file, "CALLED!\n");
+	fprintf(file, "CRTex CALLED!\n");
 	fclose(file);
 	return fpCreateRemoteThreadEx(a, b, c, d, e, f, g, h);
 }
