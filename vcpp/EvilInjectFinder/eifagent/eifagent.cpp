@@ -17,31 +17,17 @@ typedef struct _ProcessCallbackInfo {
 
 typedef struct _CLIENT_ID
 {
-	PVOID UniqueProcess;
-	PVOID UniqueThread;
+	UINT64 UniqueProcess;
+	UINT64 UniqueThread;
 } CLIENT_ID, *PCLIENT_ID;
-
-/*
-NTSTATUS WINAPI RtlCreateUserThread(
-	HANDLE hProcess,
-	SECURITY_DESCRIPTOR* pSec,
-	BOOLEAN fCreateSuspended,
-	ULONG StackZeroBits,
-	SIZE_T* StackReserved,
-	SIZE_T* StackCommit,
-	void*,
-	void*,
-	HANDLE* pThreadHandle,
-	CLIENT_ID* pResult);
-	*/
 
 EXTERN_C LONG WINAPI RtlCreateUserThread(HANDLE,
 	PSECURITY_DESCRIPTOR,
-	BOOLEAN, ULONG,
-	PULONG, PULONG,
+	BOOLEAN, SIZE_T,
+	PSIZE_T, PSIZE_T,
 	PVOID, PVOID,
-	PHANDLE, PCLIENT_ID);
-EXTERN_C LONG WINAPI NtResumeThread(HANDLE ThreadHandle, PULONG SuspendCount);
+	PHANDLE, PCLIENT_ID
+);
 
 using namespace std;
 
@@ -55,7 +41,8 @@ FILE *file;
 int loadDriver() {
 	SC_HANDLE hSCManager;
 	SC_HANDLE hService;
-	hSCManager = OpenSCManager(NULL, NULL, SC_MANAGER_CREATE_SERVICE);
+	BOOL status = FALSE;
+	hSCManager = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
 	if (hSCManager)	{
 		char path[MAX_PATH];
 		GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -64,41 +51,68 @@ int loadDriver() {
 		strcat_s(path, sizeof(path), "\\agentdrv.sys");
 		wchar_t wPath[4096] = { 0 };
 		MultiByteToWideChar(0, 0, path, strlen(path), wPath, (int)strlen(path));
-		wcerr << wPath << endl;
-		hService = CreateService(hSCManager, L"agentdrv", L"agentdrv", SERVICE_START | DELETE | SERVICE_STOP, SERVICE_KERNEL_DRIVER, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE, wPath, NULL, NULL, NULL, NULL, NULL);
+		hService = CreateService(hSCManager, L"agentdrv", L"agentdrv", SERVICE_START | SERVICE_QUERY_STATUS, SERVICE_KERNEL_DRIVER, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE, wPath, NULL, NULL, NULL, NULL, NULL);
 		if (!hService) {
-			cerr << "Service create problem." << endl;
-			if (GetLastError() == ERROR_DUPLICATE_SERVICE_NAME) {
-				hService = OpenService(hSCManager, L"agentdrv", SERVICE_START | DELETE | SERVICE_STOP);
-				if (!hService)
-					return FALSE;
+			fprintf(file, "Why? %d", GetLastError());
+			if (GetLastError() == ERROR_DUPLICATE_SERVICE_NAME || GetLastError() == ERROR_SERVICE_EXISTS) {
+				fprintf(file, "Driver exists, attempting to start.\n");
+				CloseServiceHandle(hService);
+				hService = OpenService(hSCManager, L"agentdrv", SERVICE_START | SERVICE_QUERY_STATUS);
+				if (!hService) {
+					fprintf(file, "Unable to open driver service.\n");
+					CloseServiceHandle(hService);
+					CloseServiceHandle(hSCManager);
+					return status;
+				}
 			}
-			else
-				return FALSE;
+			else {
+				fprintf(file, "Unable to create driver service.\n");
+				CloseServiceHandle(hService);
+				CloseServiceHandle(hSCManager);
+				return status;
+			}
 		}
 		if (hService) {
-			cerr << "Starting service." << endl;
-			if (StartService(hService, 0, NULL))
-				return TRUE;
-			else
-				return FALSE;
+			SERVICE_STATUS svcStatus;
+			if (QueryServiceStatus(hService, &svcStatus) == FALSE) {
+				fprintf(file, "Unable to query driver service status.\n");
+			}
+			else if (svcStatus.dwCurrentState == SERVICE_RUNNING) {
+				fprintf(file, "Driver already running.\n");
+				status = TRUE;
+			}
+			else if (StartService(hService, 0, NULL)) {
+				fprintf(file, "Driver started.\n");
+				status = TRUE;
+			}
+			else {
+				fprintf(file, "Unable to start driver.\n");
+			}
+			CloseServiceHandle(hService);
+			CloseServiceHandle(hSCManager);
+			return status;
 		}
-		CloseServiceHandle(hSCManager);
-		return TRUE;
 	}
-	else
-		return FALSE;
+	CloseServiceHandle(hSCManager);
+	return status;
 }
 
 int unloadDriver() {
 	SC_HANDLE hSCManager;
 	SC_HANDLE hService;
 	SERVICE_STATUS ss;
-	hSCManager = OpenSCManager(NULL, NULL, SC_MANAGER_CREATE_SERVICE);
+	hSCManager = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
 	if (hSCManager) {
-		hService = OpenService(hSCManager, L"agentdrv", SERVICE_START | DELETE | SERVICE_STOP);
-		ControlService(hService, SERVICE_CONTROL_STOP, &ss);
-		DeleteService(hService);
+		hService = OpenService(hSCManager, L"agentdrv", DELETE | SERVICE_STOP | SERVICE_QUERY_STATUS);
+		if (hService) {
+			ControlService(hService, SERVICE_CONTROL_STOP, &ss);
+			SERVICE_STATUS svcStatus;
+			while (QueryServiceStatus(hService, &svcStatus) && svcStatus.dwCurrentState != SERVICE_STOPPED) {
+				QueryServiceStatus(hService, &svcStatus);
+				Sleep(500);
+			}
+			DeleteService(hService);
+		}
 		CloseServiceHandle(hService);
 	}
 	CloseServiceHandle(hSCManager);
@@ -129,48 +143,74 @@ int SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege) {
 	return TRUE;
 }
 
-bool inject(DWORD pid)
+void inject(DWORD pid)
 {
+	Sleep(1000);
 	HANDLE process = OpenProcess(PROCESS_ALL_ACCESS, false, pid);
 	if (!process) {
+		CloseHandle(process);
 		fprintf(file, "Unable to open process.\n");
-		return false;
+		return;
 	}
 	BOOL status;
 	BOOL process_is32 = false;
-	HANDLE thread;
 	CLIENT_ID cid;
 	IsWow64Process(process, &process_is32);
-	char *dllName;
+
+	char *dllPath;
+	fprintf(file, "Process is 32bits? %d\n", process_is32);
 	if (process_is32)	
-		dllName = "c:\\temp\\eifdllx32.dll";
+		dllPath = "c:\\temp\\eifdllx32.dll";
 	else
-		dllName = "c:\\temp\\eifdllx64.dll";
-	fprintf(file, "Injecting... %s in pid... %d\n", dllName, (int)pid);
-	if (process) {
-		LPVOID llAddr = (LPVOID)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA");
-		LPVOID baseAddress = VirtualAllocEx(process, 0, strlen(dllName), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-		status = WriteProcessMemory(process, baseAddress, dllName, strlen(dllName), NULL);
-		if (!status) {
-			fprintf(file, "Unable to write to process: %d.\n", pid);
-			return false;
+		dllPath = "c:\\temp\\eifdllx64.dll";
+	fprintf(file, "Injecting... %s in pid... %d\n", dllPath, (int)pid);
+	BOOL kernel32Loaded = FALSE;
+	MEMORY_BASIC_INFORMATION mbi;
+	PBYTE addr = 0;
+	SYSTEM_INFO sysinfo;
+	GetSystemInfo(&sysinfo);
+	while (addr < sysinfo.lpMaximumApplicationAddress) {
+		if (VirtualQueryEx(process, addr, &mbi, sizeof(mbi)) == 0)
+			break;
+		if (mbi.State == MEM_COMMIT) {
+			char modName[MAX_PATH];
+			if (GetMappedFileNameA(process, addr, modName, sizeof(modName)) > 0) {
+				//fprintf(file, "Module: %s\n", modName);
+				if (strstr(modName, "kernel32.dll") != NULL) {
+					kernel32Loaded = TRUE;
+					break;
+				}
+			}
 		}
-		RtlCreateUserThread(process, NULL, false, 0, 0, 0, llAddr, baseAddress, &thread, &cid);
-		//thread = CreateRemoteThread(process, NULL, 0, (LPTHREAD_START_ROUTINE)llAddr, baseAddress, NULL, 0);
-		if (!thread) {
-			wchar_t buf[256];
-			FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), buf, 256, NULL);
-			fprintf(file, "Unable to start thread in process: %d.\n", pid, buf);
-			fwprintf(file, L"This: %s", buf);
-			return false;
-		}
-		WaitForSingleObject(thread, INFINITE);
-		CloseHandle(thread);
-		CloseHandle(process);
-		fprintf(file, "Injection complete.\n");
-		return true;
+		addr += mbi.RegionSize;
 	}
-	return false;
+	if (process && kernel32Loaded && !process_is32) {
+		
+		HANDLE thread = nullptr;
+		HMODULE k32 = GetModuleHandleA("kernel32.dll");
+		LPVOID llAddr = (LPVOID)GetProcAddress(k32, "LoadLibraryA");
+		LPVOID baseAddr = VirtualAllocEx(process, 0, strlen(dllPath), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+		if (k32 && llAddr && baseAddr) {
+			status = WriteProcessMemory(process, baseAddr, dllPath, strlen(dllPath), NULL);
+			if (!status) {
+				fprintf(file, "Unable to write to process: %d.\n", pid);
+			}
+			else {
+				RtlCreateUserThread(process, NULL, false, 0, 0, 0, llAddr, baseAddr, &thread, &cid);
+				if (!thread) {
+					fprintf(file, "Unable to start thread in process: %d.\n", pid);
+				}
+				else
+					fprintf(file, "Injection complete.\n");
+			}
+		}
+		CloseHandle(k32);
+		CloseHandle(thread);
+	}
+	else {
+		fprintf(file, "Not injecting...\n");
+	}
+	CloseHandle(process);
 }
 
 void ReportStatus(DWORD state) {
@@ -235,7 +275,6 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 	SetPrivilege(token, L"SeDebugPrivilege", TRUE);
 	if (!loadDriver()) {
 		fprintf(file, "Unable to load kernel driver.\n");
-		Sleep(1000 * 5);
 		unloadDriver();
 		ReportStatus(SERVICE_STOP_PENDING);
 		CloseHandle(g_StopEvent);
@@ -255,27 +294,40 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		CloseHandle(g_StopEvent);
 		ReportStatus(SERVICE_STOPPED);
 	}
-	while (WaitForSingleObject(g_StopEvent, 3000) != WAIT_OBJECT_0)
+	while (WaitForSingleObject(g_StopEvent, 0) != WAIT_OBJECT_0)
 	{
-		ov.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-		DWORD result = WaitForSingleObject(kernelEvent, INFINITE);
-		status = DeviceIoControl(driver, IOCTL_GET_PROCESS_INFO, 0, 0, &processCallbackInfo, sizeof(processCallbackInfo), &bytesReturned, &ov);
-		status = GetOverlappedResult(driver, &ov, &bytesReturned, TRUE);
-		if (processCallbackInfo.create) {
-			fprintf(file, "CREATE EVENT! %d\n", processCallbackInfo.processId);
-			inject((DWORD)processCallbackInfo.processId);
+		if (WaitForSingleObject(kernelEvent, 500) != WAIT_TIMEOUT) {
+			ov.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+			status = DeviceIoControl(driver, IOCTL_GET_PROCESS_INFO, 0, 0, &processCallbackInfo, sizeof(processCallbackInfo), &bytesReturned, &ov);
+			status = GetOverlappedResult(driver, &ov, &bytesReturned, TRUE);
+			if (processCallbackInfo.create) {
+				CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(inject), processCallbackInfo.processId, 0, nullptr);
+				//inject((DWORD)processCallbackInfo.processId);
+			}
+			CloseHandle(ov.hEvent);
 		}
-		CloseHandle(ov.hEvent);
 	}
+	CloseHandle(driver);
 	unloadDriver();
-	CloseHandle(file);
+	fclose(file);
 	ReportStatus(SERVICE_STOP_PENDING);
 	CloseHandle(g_StopEvent);
 	ReportStatus(SERVICE_STOPPED);
 }
 
-int main() {
+int main(int argc, char* argv[]) {
 	fopen_s(&file, "C:\\temp\\agentlog.txt", "a+");
+
+	/*
+	DWORD pid = atoi(argv[1]);
+	HANDLE currentPID = GetCurrentProcess();
+	HANDLE token;
+	OpenProcessToken(currentPID, 40, &token);
+	SetPrivilege(token, L"SeDebugPrivilege", TRUE);
+	cout << "Injecting pid: " << pid << endl;
+	inject(pid);
+	fclose(file);
+	*/
 	SERVICE_TABLE_ENTRY serviceTable[] = {
 		{ _T(""), &ServiceMain },
 		{ NULL, NULL }
@@ -287,5 +339,5 @@ int main() {
 		cerr << "This agent must be started as a service." << endl;
 		return -1; // Program not started as a service.
 	} else
-		return -2; // Other error.
+		return -2; // Other error
 }

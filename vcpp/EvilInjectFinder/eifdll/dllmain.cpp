@@ -22,31 +22,21 @@ LOADLIBRARYW fpLoadLibraryW = NULL;
 CREATEREMOTETHREAD fpCreateRemoteThread = NULL;
 CREATEREMOTETHREADEX fpCreateRemoteThreadEx = NULL;
 MESSAGEBOXW fpMessageBoxW = NULL;
+HANDLE die, initThread;
 
 HMODULE WINAPI DetourLoadLibraryW(LPCTSTR a)
 {
-	FILE *file;
-	fopen_s(&file, "C:\\temp\\log.txt", "a+");
-	fprintf(file, "LL CALLED!\n");
-	fclose(file);
+	DWORD pid = GetCurrentProcessId();
 	return fpLoadLibraryW(a);
 }
 
 HANDLE WINAPI DetourCreateRemoteThread(HANDLE a, LPSECURITY_ATTRIBUTES b, SIZE_T c, LPTHREAD_START_ROUTINE d, LPVOID e, DWORD f, LPDWORD g)
 {
-	FILE *file;
-	fopen_s(&file, "C:\\temp\\log.txt", "a+");
-	fprintf(file, "CRT CALLED!\n");
-	fclose(file);
 	return fpCreateRemoteThread(a, b, c, d, e, f, g);
 }
 
 HANDLE WINAPI DetourCreateRemoteThreadEx(HANDLE a, LPSECURITY_ATTRIBUTES b, SIZE_T c, LPTHREAD_START_ROUTINE d, LPVOID e, DWORD f, LPPROC_THREAD_ATTRIBUTE_LIST g, LPDWORD h)
 {
-	FILE *file;
-	fopen_s(&file, "C:\\temp\\log.txt", "a+");
-	fprintf(file, "CRTex CALLED!\n");
-	fclose(file);
 	return fpCreateRemoteThreadEx(a, b, c, d, e, f, g, h);
 }
 
@@ -56,10 +46,7 @@ int WINAPI DetourMessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT 
 }
 
 int init() {
-	FILE *file;
-	fopen_s(&file, "C:\\temp\\temp.txt", "a+");
-	if (file)
-		fprintf(file, "DLL attach function called.\n");
+	/*
 	if (MH_Initialize() != MH_OK)
 	{
 		return FALSE;
@@ -72,7 +59,6 @@ int init() {
 	{
 		return FALSE;
 	}
-	// Create a hook for MessageBoxW, in disabled state.
 	if (MH_CreateHookApiEx(L"user32", "MessageBoxW", &DetourMessageBoxW, &fpMessageBoxW) != MH_OK)
 	{
 		return FALSE;
@@ -85,7 +71,6 @@ int init() {
 	{
 		return FALSE;
 	}
-	// Enable the hook for MessageBoxW.
 	if (MH_EnableHook(&MessageBoxW) != MH_OK)
 	{
 		return FALSE;
@@ -97,12 +82,11 @@ int init() {
 	if (MH_EnableHook(&CreateRemoteThreadEx) != MH_OK)
 	{
 		return FALSE;
+	}*/
+	while (WaitForSingleObject(die, 500) != WAIT_OBJECT_0) {
+		Sleep(1000);
 	}
-	if (file) {
-		fprintf(file, "DLL attach complete...\n");
-		fclose(file);
-	}
-	return WaitForSingleObject(INVALID_HANDLE_VALUE, INFINITE);
+	return TRUE;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /* lpReserved */)
@@ -111,20 +95,27 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /* lpRes
 	switch (ul_reason_for_call)
 	{
 	case DLL_PROCESS_ATTACH:
-		return CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(init), nullptr, 0, nullptr) > nullptr;
-	case DLL_THREAD_ATTACH:
-	case DLL_THREAD_DETACH:
+		die = CreateEvent(0, TRUE, FALSE, 0);
+		//initThread = CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(init), nullptr, 0, nullptr);
+		//return initThread > nullptr;
+		return TRUE;
 	case DLL_PROCESS_DETACH:
-		if (MH_DisableHook(&LoadLibrary) != MH_OK)
-			return FALSE;
+		SetEvent(die);
+		if (WaitForSingleObject(initThread, 5000) == WAIT_TIMEOUT)
+			TerminateThread(initThread, 0);
+		CloseHandle(initThread);
+		CloseHandle(die);
+		/*
 		if (MH_DisableHook(&MessageBoxW) != MH_OK)
+			return FALSE;
+		if (MH_DisableHook(&LoadLibrary) != MH_OK)
 			return FALSE;
 		if (MH_DisableHook(&CreateRemoteThread) != MH_OK)
 			return FALSE;
 		if (MH_DisableHook(&CreateRemoteThreadEx) != MH_OK)
 			return FALSE;
 		if (MH_Uninitialize() != MH_OK)
-			return FALSE;
+			return FALSE;*/
 		return TRUE;
 	}
 	return TRUE;
