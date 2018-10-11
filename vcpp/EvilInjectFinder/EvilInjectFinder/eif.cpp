@@ -361,7 +361,7 @@ void ScanProcesses(map<int, PROCESS> &processes, ARG &sArgs, int pid) {
 	PROCESSENTRY32 pe32;
 	pe32.dwSize = sizeof(PROCESSENTRY32);
 	SYSTEM_INFO si;
-	GetSystemInfo(&si);
+	GetNativeSystemInfo(&si);
 	HANDLE processSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if (Process32First(processSnap, &pe32)) {
 		while (Process32Next(processSnap, &pe32)) {
@@ -423,7 +423,7 @@ void ScanProcesses(map<int, PROCESS> &processes, ARG &sArgs, int pid) {
 				else
 					maxAddress = (ULONGLONG)si.lpMaximumApplicationAddress;
 #else
-				if (!process_is32) {
+				if (!process_is32 && si.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_INTEL) {
 					cerr << "Process PID " << pe32.th32ProcessID << " is 64-bit and this is a 32-bit version of eif!" << endl;
 					continue;
 				}
