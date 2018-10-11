@@ -46,7 +46,6 @@ int WINAPI DetourMessageBoxW(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT 
 }
 
 int init() {
-	/*
 	if (MH_Initialize() != MH_OK)
 	{
 		return FALSE;
@@ -82,7 +81,7 @@ int init() {
 	if (MH_EnableHook(&CreateRemoteThreadEx) != MH_OK)
 	{
 		return FALSE;
-	}*/
+	}
 	while (WaitForSingleObject(die, 500) != WAIT_OBJECT_0) {
 		Sleep(1000);
 	}
@@ -96,8 +95,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /* lpRes
 	{
 	case DLL_PROCESS_ATTACH:
 		die = CreateEvent(0, TRUE, FALSE, 0);
-		//initThread = CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(init), nullptr, 0, nullptr);
-		//return initThread > nullptr;
+		initThread = CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(init), nullptr, 0, nullptr);
+		return initThread > nullptr;
 		return TRUE;
 	case DLL_PROCESS_DETACH:
 		SetEvent(die);
@@ -105,7 +104,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /* lpRes
 			TerminateThread(initThread, 0);
 		CloseHandle(initThread);
 		CloseHandle(die);
-		/*
 		if (MH_DisableHook(&MessageBoxW) != MH_OK)
 			return FALSE;
 		if (MH_DisableHook(&LoadLibrary) != MH_OK)
@@ -115,7 +113,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /* lpRes
 		if (MH_DisableHook(&CreateRemoteThreadEx) != MH_OK)
 			return FALSE;
 		if (MH_Uninitialize() != MH_OK)
-			return FALSE;*/
+			return FALSE;
 		return TRUE;
 	}
 	return TRUE;

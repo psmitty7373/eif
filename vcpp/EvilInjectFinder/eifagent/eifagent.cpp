@@ -6,6 +6,8 @@
 #define EIF_32BIT_DLL L"c:\\temp\\eifdll32.dll"
 #define EIF_64BIT_DLL L"c:\\temp\\eifdll64.dll"
 
+#define DEBUG
+
 typedef struct _ProcessCallbackInfo {
 	HANDLE  parentId;
 	HANDLE  processId;
@@ -123,7 +125,7 @@ int SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege) {
 	TOKEN_PRIVILEGES tp;
 	LUID luid;
 	if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid)) {
-		wcerr << "LookupPrivilegeValue error: " << GetLastError() << endl;
+		fprintf(file, "Privilege lookup error.\n");
 		return FALSE;
 	}
 	tp.PrivilegeCount = 1;
@@ -133,11 +135,11 @@ int SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege) {
 	else
 		tp.Privileges[0].Attributes = 0;
 	if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), (PTOKEN_PRIVILEGES)NULL, (PDWORD)NULL)) {
-		wcerr << "AdjustTokenPrivileges error: " << GetLastError() << endl;
+		fprintf(file, "Unable to adjust token: %d.\n", GetLastError());
 		return FALSE;
 	}
 	if (GetLastError() == ERROR_NOT_ALL_ASSIGNED) {
-		cerr << "Failed to set privileges.  Please run as an administrator." << endl;
+		fprintf(file, "Failed to set privileges.  Please run as an administrator.");
 		return FALSE;
 	}
 	return TRUE;
@@ -146,6 +148,7 @@ int SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege) {
 void inject(DWORD pid)
 {
 	Sleep(1000);
+	fprintf(file, "Injecting: %d.\n", pid);
 	HANDLE process = OpenProcess(PROCESS_ALL_ACCESS, false, pid);
 	if (!process) {
 		CloseHandle(process);
@@ -213,6 +216,20 @@ void inject(DWORD pid)
 	CloseHandle(process);
 }
 
+void inject_all() {
+	DWORD processes[1024], cbNeeded, cProcesses;
+	if (!EnumProcesses(processes, sizeof(processes), &cbNeeded))
+		return;
+	cProcesses = cbNeeded / sizeof(DWORD);
+
+	for (unsigned int i = 0; i < cProcesses; i++) {
+		if (processes[i] != 0) {
+			DWORD_PTR pp = processes[i];
+			CloseHandle(CreateThread(NULL, NULL, reinterpret_cast<LPTHREAD_START_ROUTINE>(inject), reinterpret_cast<LPVOID>(pp), 0, nullptr));
+		}
+	}
+}
+
 void ReportStatus(DWORD state) {
 	g_CurrentState = state;
 	SERVICE_STATUS serviceStatus = {
@@ -256,6 +273,22 @@ DWORD WINAPI HandlerEx(DWORD control, DWORD eventType, void *eventData, void *co
 	return NO_ERROR;
 }
 
+int blark() {
+	HANDLE pipe = CreateNamedPipe(L"eifagent", PIPE_ACCESS_INBOUND | PIPE_ACCESS_OUTBOUND, PIPE_WAIT, 1, 1024, 1024, 120 * 1000, NULL);
+	if (pipe == INVALID_HANDLE_VALUE) {
+		fprintf(file, "Unable to create named pipe: %d.\n", GetLastError());
+	}
+	char data[1024];
+	DWORD bytesRead;
+	ConnectNamedPipe(pipe, NULL);
+	while (1) {
+		ReadFile(pipe, data, 1024, &bytesRead, NULL);
+		if (bytesRead > 0)
+			fprintf(file, "From named pipe: %s.\n", data);
+	}
+	CloseHandle(pipe);
+}
+
 void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 {
 	OVERLAPPED ov = { 0 };
@@ -294,6 +327,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		CloseHandle(g_StopEvent);
 		ReportStatus(SERVICE_STOPPED);
 	}
+	inject_all();
 	while (WaitForSingleObject(g_StopEvent, 0) != WAIT_OBJECT_0)
 	{
 		if (WaitForSingleObject(kernelEvent, 500) != WAIT_TIMEOUT) {
@@ -301,8 +335,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 			status = DeviceIoControl(driver, IOCTL_GET_PROCESS_INFO, 0, 0, &processCallbackInfo, sizeof(processCallbackInfo), &bytesReturned, &ov);
 			status = GetOverlappedResult(driver, &ov, &bytesReturned, TRUE);
 			if (processCallbackInfo.create) {
-				CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(inject), processCallbackInfo.processId, 0, nullptr);
-				//inject((DWORD)processCallbackInfo.processId);
+				CloseHandle(CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(inject), processCallbackInfo.processId, 0, nullptr));
 			}
 			CloseHandle(ov.hEvent);
 		}
@@ -316,18 +349,25 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 }
 
 int main(int argc, char* argv[]) {
-	fopen_s(&file, "C:\\temp\\agentlog.txt", "a+");
 
+	if ((file = _fsopen("C:\\temp\\agentlog.txt", "a+", _SH_DENYWR)) == NULL) {
+		return 1;
+	}
 	/*
-	DWORD pid = atoi(argv[1]);
+	//DWORD pid = atoi(argv[1]);
 	HANDLE currentPID = GetCurrentProcess();
 	HANDLE token;
 	OpenProcessToken(currentPID, 40, &token);
 	SetPrivilege(token, L"SeDebugPrivilege", TRUE);
-	cout << "Injecting pid: " << pid << endl;
-	inject(pid);
+	//cout << "Injecting pid: " << pid << endl;
+	//inject(pid);
+	cout << "Processes:" << endl;
+	inject_all();
 	fclose(file);
+	Sleep(15000);
+	return 0;
 	*/
+	
 	SERVICE_TABLE_ENTRY serviceTable[] = {
 		{ _T(""), &ServiceMain },
 		{ NULL, NULL }

@@ -532,7 +532,7 @@ int main(int argc, char* argv[])
 		clog << "+------------------------------------------------+" << endl << endl;
 		option::printUsage(std::cout, usage);
 		while (1) {
-			MessageBoxW(nullptr, TEXT("THIS IS A TEST!"), TEXT("TEST!"), MB_OK);
+			 MessageBoxW(nullptr, TEXT("THIS IS A TEST!"), TEXT("TEST!"), MB_OK);
 			Sleep(5000);
 		}
 		return 0;
