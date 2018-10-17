@@ -527,6 +527,7 @@ int main(int argc, char* argv[])
 	sArgs.signatureMatch = false;
 	sArgs.moduleBacking = false;
 	sArgs.useDriver = false;
+	sArgs.writePages = false;
 	sArgs.format = "STD";
 #ifdef _WIN64
 	sArgs.arch = "64bit";
