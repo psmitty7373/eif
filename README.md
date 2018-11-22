@@ -1,10 +1,10 @@
 # eif - Evil Inject Finder
-##Introduction
+## Introduction
 The eif tool is designed to help you find evil injected malware.  Malware injected directly into a process using reflective dll injection typically will not exist on disk.  This tool is designed to help you find those evil injections!  Administrative rights are currently necessary to adequately examine the memory of running processes.  Some memory pages will be unreadable if marked as protected processes by the OS.
-##Downloads
+## Downloads
 The latest binaries can be found in:
 https://github.com/psmitty7373/eif/tree/master/binaries
-##Examples
+## Examples
 The example below demonstrates using eif with a signatures file to find injects in all processes on the system.  A meterpreter has been loaded into MicrosoftEdge using reflective injection.
 ```
 C:\Users\IEUser\Desktop>EvilInjectFinder.exe -s sigs.txt -S
@@ -20,13 +20,17 @@ Analysing PID: 3908 : MicrosoftEdgeCP.exe
 +---------------------------------------------------------------------------------------------------------------------------------------------------------+
 ```
 
-##Usage
+## Usage
 ```
+Evil Injection Finder (EIF)
+Helping you find evil injections since 2017.
 USAGE: example [options]
 
 Options:
   -h               Print usage and exit.
-  -b               Only show matches without .dll backing.
+  -b               Only show matches without file backing.
+  -c               Compare in-memory code segment with on-disk code segment.
+  -C               Only show processes with non-matching code segments.
   -d               Use kernel driver to access protected process memory.
   -f <format>      Output format (CSV,).
   -i               Search pages with specific permissions. Default is
@@ -36,13 +40,10 @@ Options:
   -p               Specify a single PID.
   -w <c:\outdir\>  Write matching pages to disk.
 
-Examples:
-  eif.exe -p 123 -s sigs.txt -S -b -i EXECUTE_READWRITE
-
 Available Permissions: EXECUTE, EXECUTE_READ, EXECUTE_READWRITE,
 EXECUTE_WRITECOPY, NOACCESS, READWRITE, WRITECOPY, READONLY
 ```
-##Signatures
+## Signatures
 Eif can search memory pages based on a signatures file.  Currently, this is a very simplistic string match search but is effective.  An example signatures file is below:
 ```
 WSASTARTUP
@@ -68,7 +69,7 @@ AesCryptoServiceProvider
 Invoke-Empire
 RSACryptoServiceProvider
 ```
-##References
+## References
 ```
 Thanks to Nikos Laleas, much of the initial python project was based on his project at:
 https://github.com/nccgroup/memaddressanalysis

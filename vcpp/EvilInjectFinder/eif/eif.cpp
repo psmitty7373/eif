@@ -13,6 +13,8 @@
 #include <iomanip>
 #include <algorithm>
 #include <VersionHelpers.h>
+#include <Psapi.h>
+#include <DbgHelp.h>
 #include "optionparser.h"
 
 #define MAX_PAGE_SIZE 128 * 1024 * 1024
@@ -59,6 +61,7 @@ struct PAGE {
 #endif
 	string perm;
 	wstring module;
+	wstring exePath;
 	string mz;
 	string dos;
 	string nops;
@@ -72,6 +75,8 @@ struct ARG {
 	LPVOID pageAddress;
 	bool signatureMatch;
 	bool moduleBacking;
+	bool compare;
+	bool compareOnly;
 	bool useDriver;
 	bool writePages;
 	string format;
@@ -85,6 +90,15 @@ struct PROCESS {
 	list<PAGE> pages;
 	list<MODULEENTRY32> modules;
 	DWORD integrityLevel;
+	int codeMatch;
+	int codeDiffCnt;
+#ifdef _WIN64
+	ULONGLONG imageBase;
+	ULONGLONG baseOfCode;
+#else
+	ULONG imageBase;
+	ULONG baseOfCode;
+#endif
 };
 
 typedef struct {
@@ -112,7 +126,7 @@ BOOLEAN loadDriver()
 		string::size_type pos = string(path).find_last_of("\\/");
 		strcpy_s(path, string(path).substr(0, pos).c_str());
 		strcat_s(path, sizeof(path), "\\eifdrv.sys");
-		wchar_t wPath[4096] = { 0 };
+		wchar_t wPath[MAX_PATH] = { 0 };
 		MultiByteToWideChar(0, 0, path, strlen(path), wPath, (int)strlen(path));
 		hService = CreateService(hSCManager, L"eifdrv", L"Evil Injection Finder", SERVICE_START | DELETE | SERVICE_STOP, SERVICE_KERNEL_DRIVER, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE, wPath, NULL, NULL, NULL, NULL, NULL);
 		if (!hService)
@@ -232,6 +246,8 @@ void ReadMem(PROCESS &p, PAGE &page, ARG &sArgs, HANDLE hProc, ULONGLONG baseAdd
 	buf.resize(regionSize);
 	SIZE_T gotBytes;
 	BOOLEAN driverSuccess = FALSE;
+
+	// if using driver and process is protected
 	if (sArgs.useDriver && (p.integrityLevel == SECURITY_MANDATORY_SYSTEM_RID || p.integrityLevel == SECURITY_MANDATORY_SYSTEM_RID)) {
 		DWORD dwBytesRead = 0;
 		char respBuffer[50] = { 0 };
@@ -252,18 +268,74 @@ void ReadMem(PROCESS &p, PAGE &page, ARG &sArgs, HANDLE hProc, ULONGLONG baseAdd
 		memcpy(&buf[0], sArgs.pageAddress, regionSize);
 		driverSuccess = TRUE;
 	}
+
 	if (driverSuccess || ReadProcessMemory(hProc, (LPCVOID)baseAddress, &buf[0], regionSize, &gotBytes)) {
 		page.md5 = MD5(buf);
+
+		// check for MZ header
 		if (buf.find("MZ") == 0) {
 			page.mz = "Yes";
 		}
 		else
 			page.mz = "No";
+
+		// check for dos string
 		if (buf.find("This program cannot be run in DOS mode") != string::npos) {
 			page.dos = "Yes";
 		}
 		else
 			page.dos = "No";
+
+		// if this page is our image, calculate address to code segment
+		if (p.imageBase && page.pageAddress == p.imageBase) {
+			IMAGE_NT_HEADERS *pNtHdr = ImageNtHeader(&buf[0]);
+			if (pNtHdr) {
+				p.baseOfCode = p.imageBase + pNtHdr->OptionalHeader.BaseOfCode;
+			}
+		}
+
+		if (sArgs.compare && p.baseOfCode && page.pageAddress == p.baseOfCode) {
+			HANDLE hFile = CreateFileW(page.exePath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+			if (hFile != INVALID_HANDLE_VALUE) {
+				HANDLE hMapping = CreateFileMapping(hFile, 0, PAGE_READONLY, 0, 0, 0);
+				LPVOID lpData = MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, 0);
+				IMAGE_NT_HEADERS *pNtHdr = ImageNtHeader(lpData);
+				IMAGE_SECTION_HEADER *pSectionHdr = (IMAGE_SECTION_HEADER*)((ULONGLONG)pNtHdr + 0x18 + pNtHdr->FileHeader.SizeOfOptionalHeader);
+				for (int section = 0; section < pNtHdr->FileHeader.NumberOfSections; ++section) {
+					if (pNtHdr->OptionalHeader.AddressOfEntryPoint >= pSectionHdr->VirtualAddress && pNtHdr->OptionalHeader.AddressOfEntryPoint < pSectionHdr->VirtualAddress + pSectionHdr->Misc.VirtualSize) {
+						char *codeOffset = (char *)lpData + pSectionHdr->PointerToRawData;
+						if (sArgs.writePages) {
+							ofstream out;
+							char filename[128];
+							sprintf_s(filename, sizeof(filename), "%d-%llx.disk.bin", p.pe32.th32ProcessID, baseAddress);
+							if (sArgs.outDir[sArgs.outDir.length() - 1] != '\\')
+								out.open((sArgs.outDir + "\\" + filename).c_str(), ios::out | ios::binary);
+							else
+								out.open((sArgs.outDir + filename).c_str(), ios::out | ios::binary);
+							out.write(codeOffset, pNtHdr->OptionalHeader.SizeOfCode);
+							out.close();
+						}
+						if (memcmp(codeOffset, &buf[0], pNtHdr->OptionalHeader.SizeOfCode) == 0) {
+							p.codeMatch = 1;
+						}
+						else {
+							for (UINT i = 0; i < pNtHdr->OptionalHeader.SizeOfCode; i++) {
+								if (*(codeOffset + i) != buf[i])
+									p.codeDiffCnt++;
+							}
+							p.codeMatch = -1;
+						}
+						break;
+					}
+					pSectionHdr++;
+				}
+				UnmapViewOfFile(lpData);
+				CloseHandle(hMapping);
+				CloseHandle(hFile);
+			}
+		}
+
+		// search memory for signatures from signature file
 		for (vector<string>::iterator it = sArgs.signatures.begin(); it != sArgs.signatures.end(); it++) {
 			if (buf.find(it->c_str()) != string::npos) {
 				page.sigs++;
@@ -275,6 +347,8 @@ void ReadMem(PROCESS &p, PAGE &page, ARG &sArgs, HANDLE hProc, ULONGLONG baseAdd
 				page.sigs++;
 			}
 		}
+
+		// if writing memory pages, write them
 		if (sArgs.writePages && (!sArgs.signatureMatch || page.sigs > 0)) {
 			ofstream out;
 			char filename[128];
@@ -313,14 +387,20 @@ ULONG ScanPage(PROCESS &p, ARG &sArgs, HANDLE hProc, ULONG pageAddress, BOOL pro
 		ULONG nextRegion = (ULONG)mbi.BaseAddress + mbi.RegionSize;
 #endif
 		page.pageAddress = pageAddress;
+
+		// get the module name associated with this page
 		for (list<MODULEENTRY32>::iterator it = p.modules.begin(); it != p.modules.end(); it++) {
 			if (pageAddress >= (ULONGLONG)it->modBaseAddr && pageAddress <= (ULONGLONG)(it->modBaseAddr + it->modBaseSize)) {
 				page.module = wstring(it->szModule);
+				page.exePath = wstring(it->szExePath);
 				break;
 			}
 		}
+
+		// if only checking for unbacked modules, continue
 		if (page.module != L"" && sArgs.moduleBacking)
 			return nextRegion;
+
 		if (mbi.Protect != 0 && pageAddress >= minAddress) {
 			string protect = "";
 			string modifier;
@@ -342,12 +422,18 @@ ULONG ScanPage(PROCESS &p, ARG &sArgs, HANDLE hProc, ULONG pageAddress, BOOL pro
 			}
 			else
 				protect = getMemoryProtTag(mbi.Protect);
+
 			if (find(sArgs.permissions.begin(), sArgs.permissions.end(), protect) != sArgs.permissions.end()) {
 				ReadMem(p, page, sArgs, hProc, pageAddress, mbi.RegionSize);
 				page.perm = protect;
 				page.mbi = mbi;
 				if (!sArgs.signatureMatch || page.sigs > 0)
 					p.pages.push_back(page);
+			}
+
+			// if we're checking for hollowing, make sure to process the base image page
+			else if (pageAddress == p.imageBase) {
+				ReadMem(p, page, sArgs, hProc, pageAddress, mbi.RegionSize);
 			}
 		}
 		return nextRegion;
@@ -363,6 +449,8 @@ void ScanProcesses(map<int, PROCESS> &processes, ARG &sArgs, int pid) {
 	SYSTEM_INFO si;
 	GetNativeSystemInfo(&si);
 	HANDLE processSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
+	// iterate through processes
 	if (Process32First(processSnap, &pe32)) {
 		while (Process32Next(processSnap, &pe32)) {
 			if (pid != 0 && pe32.th32ProcessID != pid) {
@@ -370,33 +458,42 @@ void ScanProcesses(map<int, PROCESS> &processes, ARG &sArgs, int pid) {
 			}
 			PROCESS p;
 			MODULEENTRY32 me32;
-			HANDLE moduleSnap;
-			HANDLE proc;
+			HANDLE hProc;
 			p.pe32 = pe32;
+			p.imageBase = NULL;
+			p.baseOfCode = NULL;
+			p.codeMatch = 0;
+			p.codeDiffCnt = 0;
 			me32.dwSize = sizeof(MODULEENTRY32);
-			moduleSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pe32.th32ProcessID);
-			if (moduleSnap && Module32First(moduleSnap, &me32)) {
+			HANDLE hModuleSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pe32.th32ProcessID);
+			// build list of modules
+			if (hModuleSnap && Module32First(hModuleSnap, &me32)) {
 				do {
 					p.modules.push_back(me32);
-				} while (Module32Next(moduleSnap, &me32));
+				} while (Module32Next(hModuleSnap, &me32));
 			}
-			CloseHandle(moduleSnap);
+			CloseHandle(hModuleSnap);
+
+			// open process
 			if (IsWindows8OrGreater()) {
-				proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pe32.th32ProcessID);
-				if (!proc) {
-					proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pe32.th32ProcessID);
+				hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pe32.th32ProcessID);
+				if (!hProc) {
+					hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pe32.th32ProcessID);
 				}
 			}
 			else {
-				proc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pe32.th32ProcessID);
-				if (!proc) {
-					proc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pe32.th32ProcessID);
+				hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pe32.th32ProcessID);
+				if (!hProc) {
+					hProc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pe32.th32ProcessID);
 				}
 			}
-			if (proc) {
+
+			if (hProc) {
 				HANDLE token;
 				DWORD size = 0;
-				if (OpenProcessToken(proc, TOKEN_QUERY, &token)) {
+
+				// get process integrity level
+				if (OpenProcessToken(hProc, TOKEN_QUERY, &token)) {
 					if (!GetTokenInformation(token, TokenIntegrityLevel, NULL, size, &size)) {
 						if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
 							BYTE* pbIL = new BYTE[size];
@@ -405,14 +502,17 @@ void ScanProcesses(map<int, PROCESS> &processes, ARG &sArgs, int pid) {
 								DWORD dwSize2;
 								if (GetTokenInformation(token, TokenIntegrityLevel, pTML, size, &dwSize2) && dwSize2 <= size) {
 									p.integrityLevel = *GetSidSubAuthority(pTML->Label.Sid, (DWORD)(UCHAR)(*GetSidSubAuthorityCount(pTML->Label.Sid) - 1));
-									
+
 								}
 							}
 						}
 					}
 				}
+
 				BOOL process_is32 = false;
-				IsWow64Process(proc, &process_is32);
+
+				// check process bits
+				IsWow64Process(hProc, &process_is32);
 #ifdef _WIN64
 				ULONGLONG minAddress, maxAddress, pageAddress;
 				minAddress = (ULONGLONG)si.lpMinimumApplicationAddress;
@@ -423,6 +523,7 @@ void ScanProcesses(map<int, PROCESS> &processes, ARG &sArgs, int pid) {
 				else
 					maxAddress = (ULONGLONG)si.lpMaximumApplicationAddress;
 #else
+				// make sure process is 32-bit, since we're using 32-bit eif
 				if (!process_is32 && si.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_INTEL) {
 					cerr << "Process PID " << pe32.th32ProcessID << " is 64-bit and this is a 32-bit version of eif!" << endl;
 					continue;
@@ -432,20 +533,36 @@ void ScanProcesses(map<int, PROCESS> &processes, ARG &sArgs, int pid) {
 				maxAddress = (ULONG)si.lpMaximumApplicationAddress;
 				pageAddress = minAddress;
 #endif
-				while (pageAddress < maxAddress) {
-#ifdef _WIN64
-					ULONGLONG nextRegion = ScanPage(p, sArgs, proc, pageAddress, process_is32, minAddress);
-#else
-					ULONG nextRegion = ScanPage(p, sArgs, proc, pageAddress, process_is32, minAddress);
-#endif
-					if (nextRegion < 0) {
-						break;
-					}
-					pageAddress = nextRegion;
+				// get base address for process image
+				HMODULE hMod;
+				DWORD cbNeeded;
+				if (EnumProcessModules(hProc, &hMod, sizeof(hMod), &cbNeeded)) {
+					p.imageBase = (ULONGLONG)hMod;
+					ScanPage(p, sArgs, hProc, p.imageBase, process_is32, minAddress);
+				}
 
+				// if checking code segments, don't process other stuff
+				if (sArgs.compare) {
+					ScanPage(p, sArgs, hProc, p.baseOfCode, process_is32, minAddress);
+				}
+				else {
+					// walk process memory regions
+					while (pageAddress < maxAddress) {
+#ifdef _WIN64
+						ULONGLONG nextRegion = ScanPage(p, sArgs, hProc, pageAddress, process_is32, minAddress);
+#else
+						ULONG nextRegion = ScanPage(p, sArgs, hProc, pageAddress, process_is32, minAddress);
+#endif
+						if (nextRegion < 0) {
+							break;
+						}
+						pageAddress = nextRegion;
+					}
 				}
 			}
-			CloseHandle(proc);
+			CloseHandle(hProc);
+
+			// save process for output
 			processes[pe32.th32ProcessID] = p;
 		}
 	}
@@ -493,16 +610,18 @@ struct Arg : public option::Arg
 	}
 };
 
-enum  optionIndex { UNKNOWN, HELP, BACKING, DRIVER, FORMAT, OUTDIR, PERM, PID, SIGFILE, SIGMATCH };
+enum  optionIndex { UNKNOWN, HELP, BACKING, COMPARE, COMPAREONLY, DRIVER, FORMAT, OUTDIR, PERM, PID, SIGFILE, SIGMATCH };
 const option::Descriptor usage[] =
 {
 	{ UNKNOWN, 0,"" , ""    , Arg::None, "Evil Injection Finder (EIF)\n"
 	"Helping you find evil injections since 2017.\n"
 	"USAGE: example [options]\n\n"
 	"Options:" },
-	{ HELP,    0,"h" , "help", Arg::None, "  -h  \tPrint usage and exit." },
-	{ BACKING,    0,"b" , "backing", Arg::None, "  -b  \tOnly show matches without .dll backing." },
-	{ DRIVER,    0,"d" , "driver", Arg::None, "  -d  \tUse kernel driver to access protected process memory." },
+	{ HELP, 0,"h" , "help", Arg::None, "  -h  \tPrint usage and exit." },
+	{ BACKING, 0,"b" , "backing", Arg::None, "  -b  \tOnly show matches without file backing." },
+	{ COMPARE, 0,"c" , "compare", Arg::None, "  -c  \tCompare in-memory code segment with on-disk code segment." },
+	{ COMPAREONLY, 0,"C" , "compareonly", Arg::None, "  -C  \tOnly show processes with non-matching code segments." },
+	{ DRIVER, 0,"d" , "driver", Arg::None, "  -d  \tUse kernel driver to access protected process memory." },
 	{ FORMAT, 0, "f", "format", Arg::Required, "  -f <format> \tOutput format (CSV,)." },
 	{ PERM, 0, "i", "perm", Arg::Required, "  -i  \tSearch pages with specific permissions. Default is EXECUTE_READWRITE." },
 	{ SIGFILE, 0, "s", "sigfile", Arg::Required, "  -s <sigfile.txt> \tUse a signature file." },
@@ -525,6 +644,8 @@ int main(int argc, char* argv[])
 	map<int, PROCESS> processes;
 	//options parsing
 	sArgs.signatureMatch = false;
+	sArgs.compare = false;
+	sArgs.compareOnly = false;
 	sArgs.moduleBacking = false;
 	sArgs.useDriver = false;
 	sArgs.writePages = false;
@@ -558,6 +679,11 @@ int main(int argc, char* argv[])
 		{
 		case BACKING:
 			sArgs.moduleBacking = true;
+			break;
+		case COMPAREONLY:
+			sArgs.compareOnly = true;
+		case COMPARE:
+			sArgs.compare = true;
 			break;
 		case FORMAT:
 			if (string(opt.arg) == "CSV") {
@@ -621,10 +747,20 @@ int main(int argc, char* argv[])
 	ScanProcesses(processes, sArgs, pid);
 	for (map<int, PROCESS>::iterator it = processes.begin(); it != processes.end(); it++) {
 		if (it->second.pages.size() > 0) {
+			if (sArgs.compareOnly && it->second.codeMatch == 1)
+				continue;
 			if (sArgs.format == "STD") {
 				wcout << "Analysing PID: " << it->first << " : " << it->second.pe32.szExeFile << endl;
 				if (it->second.integrityLevel == SECURITY_MANDATORY_SYSTEM_RID || it->second.integrityLevel == SECURITY_MANDATORY_SYSTEM_RID)
 					wcout << "ATTENTION! PID is protected!" << endl;
+				if (sArgs.compare) {
+					if (it->second.codeMatch == -1)
+						wcout << "Codematch: WARNING! NON-MATCHING code segment. Bytes diff: " << it->second.codeDiffCnt << endl;
+					else if (it->second.codeMatch == 0)
+						wcout << "Codematch: Unable to validate code segment." << endl;
+					else
+						wcout << "Codematch: Matching code segment." << endl;
+				}
 				cout << "+" << string(153, '-') << "+" << endl;
 				cout << "|" << setw(13) << right << "Address" << " | " << setw(17) << left << "Permissions" << " | " << setw(13) << right << "Size" << " | " << setw(39) << left << "Module" << " | " << setw(3) << "MZ" << " | " << setw(3) << "DOS" << " | " << setw(4) << "Nops" << " | " << setw(4) << "Sigs" << " | " << setw(32) << "MD5" << " |" << endl;
 				cout << "+" << string(153, '-') << "+" << endl;

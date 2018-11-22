@@ -10,9 +10,6 @@ Provider=%ManufacturerName%
 CatalogFile=eifdrv.cat
 DriverVer= ; TODO: set DriverVer in stampinf property pages
 
-[DestinationDirs]
-DefaultDestDir = 12
-
 ; ================= Class section =====================
 
 [ClassInstall32]
@@ -26,6 +23,7 @@ HKR,,Icon,,-5
 1 = %DiskName%,,,""
 
 [SourceDisksFiles]
+WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll=1 ; make sure the number matches with SourceDisksNames
 eifdrv.sys  = 1,,
 
 ;*****************************************
@@ -61,6 +59,7 @@ ServiceBinary  = %12%\eifdrv.sys
 ;
 
 [DestinationDirs]
+DefaultDestDir = 12
 eifdrv_Device_CoInstaller_CopyFiles = 11
 
 [eifdrv_Device.NT.CoInstallers]
@@ -72,9 +71,6 @@ HKR,,CoInstallers32,0x00010000, "WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll,WdfC
 
 [eifdrv_Device_CoInstaller_CopyFiles]
 WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll
-
-[SourceDisksFiles]
-WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll=1 ; make sure the number matches with SourceDisksNames
 
 [eifdrv_Device.NT.Wdf]
 KmdfService =  eifdrv, eifdrv_wdfsect
