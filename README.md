@@ -4,22 +4,6 @@ The eif tool is designed to help you find evil injected malware.  Malware inject
 ## Downloads
 The latest binaries can be found in:
 https://github.com/psmitty7373/eif/tree/master/binaries
-## Examples
-The example below demonstrates using eif with a signatures file to find injects in all processes on the system.  A meterpreter has been loaded into MicrosoftEdge using reflective injection.
-```
-C:\Users\IEUser\Desktop>EvilInjectFinder.exe -s sigs.txt -S
-
-Analysing PID: 3908 : MicrosoftEdgeCP.exe
-+---------------------------------------------------------------------------------------------------------------------------------------------------------+
-|      Address | Permissions       |          Size | Module                                  | MZ  | DOS | Nops | Sigs | MD5                              |
-+---------------------------------------------------------------------------------------------------------------------------------------------------------+
-|       480000 | EXECUTE_READWRITE |        1.14MB |                                         | No  | Yes |   0% |    5 | 6CE6C24391C37E0D4883DBA14F04EA31 |
-|  1dc06950000 | EXECUTE_READWRITE |      156.00KB |                                         | Yes | Yes |   0% |    3 | AC46BC374B6CD85D3564A3F5F62B92C1 |
-|  1dc06990000 | EXECUTE_READWRITE |      436.00KB |                                         | Yes | Yes |   0% |    8 | 13CA507C4B0A15775ABCE144B7D8C4C4 |
-|  1dc07590000 | EXECUTE_READWRITE |        1.18MB |                                         | Yes | Yes |   0% |    5 | A81939E4335F18FF2213032100411659 |
-+---------------------------------------------------------------------------------------------------------------------------------------------------------+
-```
-
 ## Usage
 ```
 Evil Injection Finder (EIF)
@@ -42,7 +26,27 @@ Options:
 
 Available Permissions: EXECUTE, EXECUTE_READ, EXECUTE_READWRITE,
 EXECUTE_WRITECOPY, NOACCESS, READWRITE, WRITECOPY, READONLY
+### -w
+With the -w option, eif can write matching memory pages to disk.  This is useful because it will allow your antivirus product an opportuntity to analyze the potentially malicious code.  This is especially useful if your AV product does not suppport in-memory checking.
+### -c
+With the -c and -C option you can use eif to verify that the data in the code or text segment of the program matches the text segment in the file on disk.  While some differences are fairly common, this can be used to find a process that has been hollowed.  Combine the -c or -C option with -w to take a closer look at the mismatched memory pages.
 ```
+## Examples
+This example demonstrates using eif with a signatures file to find injects in all processes on the system.  A meterpreter has been loaded into MicrosoftEdge using reflective injection.  Signatures are simple plaintext strings and an example signatures file is included.
+```
+C:\Users\IEUser\Desktop>EvilInjectFinder.exe -s sigs.txt -S
+
+Analysing PID: 3908 : MicrosoftEdgeCP.exe
++---------------------------------------------------------------------------------------------------------------------------------------------------------+
+|      Address | Permissions       |          Size | Module                                  | MZ  | DOS | Nops | Sigs | MD5                              |
++---------------------------------------------------------------------------------------------------------------------------------------------------------+
+|       480000 | EXECUTE_READWRITE |        1.14MB |                                         | No  | Yes |   0% |    5 | 6CE6C24391C37E0D4883DBA14F04EA31 |
+|  1dc06950000 | EXECUTE_READWRITE |      156.00KB |                                         | Yes | Yes |   0% |    3 | AC46BC374B6CD85D3564A3F5F62B92C1 |
+|  1dc06990000 | EXECUTE_READWRITE |      436.00KB |                                         | Yes | Yes |   0% |    8 | 13CA507C4B0A15775ABCE144B7D8C4C4 |
+|  1dc07590000 | EXECUTE_READWRITE |        1.18MB |                                         | Yes | Yes |   0% |    5 | A81939E4335F18FF2213032100411659 |
++---------------------------------------------------------------------------------------------------------------------------------------------------------+
+```
+
 ## Signatures
 Eif can search memory pages based on a signatures file.  Currently, this is a very simplistic string match search but is effective.  An example signatures file is below:
 ```
