@@ -26,11 +26,11 @@ Options:
 
 Available Permissions: EXECUTE, EXECUTE_READ, EXECUTE_READWRITE,
 EXECUTE_WRITECOPY, NOACCESS, READWRITE, WRITECOPY, READONLY
+```
 ### -w
 With the -w option, eif can write matching memory pages to disk.  This is useful because it will allow your antivirus product an opportuntity to analyze the potentially malicious code.  This is especially useful if your AV product does not suppport in-memory checking.
 ### -c
 With the -c and -C option you can use eif to verify that the data in the code or text segment of the program matches the text segment in the file on disk.  While some differences are fairly common, this can be used to find a process that has been hollowed.  Combine the -c or -C option with -w to take a closer look at the mismatched memory pages.
-```
 ## Examples
 This example demonstrates using eif with a signatures file to find injects in all processes on the system.  A meterpreter has been loaded into MicrosoftEdge using reflective injection.  Signatures are simple plaintext strings and an example signatures file is included.
 ```
