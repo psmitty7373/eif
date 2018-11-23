@@ -286,21 +286,30 @@ void ReadMem(PROCESS &p, PAGE &page, ARG &sArgs, HANDLE hProc, ULONGLONG baseAdd
 		else
 			page.dos = "No";
 
-		// if this page is our image, calculate address to code segment
+		// if this page is our image, calculate address to text segment
 		if (p.imageBase && page.pageAddress == p.imageBase) {
 			IMAGE_NT_HEADERS *pNtHdr = ImageNtHeader(&buf[0]);
 			if (pNtHdr) {
-				p.baseOfCode = p.imageBase + pNtHdr->OptionalHeader.BaseOfCode;
+				p.baseOfCode = p.imageBase + pNtHdr->OptionalHeader.BaseOfCode; // calculate offset to text segment
 			}
 		}
 
+		// found the text segment for the image
 		if (sArgs.compare && p.baseOfCode && page.pageAddress == p.baseOfCode) {
 			HANDLE hFile = CreateFileW(page.exePath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 			if (hFile != INVALID_HANDLE_VALUE) {
 				HANDLE hMapping = CreateFileMapping(hFile, 0, PAGE_READONLY, 0, 0, 0);
+				if (hMapping == NULL)
+					goto nomapping;
 				LPVOID lpData = MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, 0);
+				if (lpData == NULL)
+					goto nomapview;
 				IMAGE_NT_HEADERS *pNtHdr = ImageNtHeader(lpData);
+				if (pNtHdr == NULL)
+					goto cleanup;
 				IMAGE_SECTION_HEADER *pSectionHdr = (IMAGE_SECTION_HEADER*)((ULONGLONG)pNtHdr + 0x18 + pNtHdr->FileHeader.SizeOfOptionalHeader);
+				if (pNtHdr == NULL)
+					goto cleanup;
 				for (int section = 0; section < pNtHdr->FileHeader.NumberOfSections; ++section) {
 					if (pNtHdr->OptionalHeader.AddressOfEntryPoint >= pSectionHdr->VirtualAddress && pNtHdr->OptionalHeader.AddressOfEntryPoint < pSectionHdr->VirtualAddress + pSectionHdr->Misc.VirtualSize) {
 						char *codeOffset = (char *)lpData + pSectionHdr->PointerToRawData;
@@ -316,25 +325,31 @@ void ReadMem(PROCESS &p, PAGE &page, ARG &sArgs, HANDLE hProc, ULONGLONG baseAdd
 							out.close();
 						}
 						if (memcmp(codeOffset, &buf[0], pNtHdr->OptionalHeader.SizeOfCode) == 0) {
-							p.codeMatch = 1;
+							p.codeMatch = 1; // code matches
 						}
 						else {
 							for (UINT i = 0; i < pNtHdr->OptionalHeader.SizeOfCode; i++) {
 								if (*(codeOffset + i) != buf[i])
 									p.codeDiffCnt++;
 							}
-							p.codeMatch = -1;
+							p.codeMatch = -1; // code doesn't match
 						}
 						break;
 					}
 					pSectionHdr++;
 				}
-				UnmapViewOfFile(lpData);
-				CloseHandle(hMapping);
-				CloseHandle(hFile);
+				cleanup:
+					UnmapViewOfFile(lpData);
+				nomapview:
+					CloseHandle(hMapping);
+					CloseHandle(hFile);
+			}
+			else {
+				p.codeMatch = -2; // could not open file
 			}
 		}
 
+		nomapping:
 		// search memory for signatures from signature file
 		for (vector<string>::iterator it = sArgs.signatures.begin(); it != sArgs.signatures.end(); it++) {
 			if (buf.find(it->c_str()) != string::npos) {
@@ -430,10 +445,12 @@ ULONG ScanPage(PROCESS &p, ARG &sArgs, HANDLE hProc, ULONG pageAddress, BOOL pro
 				if (!sArgs.signatureMatch || page.sigs > 0)
 					p.pages.push_back(page);
 			}
-
 			// if we're checking for hollowing, make sure to process the base image page
 			else if (pageAddress == p.imageBase) {
+				BOOL tWrite = sArgs.writePages;
+				sArgs.writePages = false;
 				ReadMem(p, page, sArgs, hProc, pageAddress, mbi.RegionSize);
+				sArgs.writePages = tWrite;
 			}
 		}
 		return nextRegion;
@@ -754,7 +771,9 @@ int main(int argc, char* argv[])
 				if (it->second.integrityLevel == SECURITY_MANDATORY_SYSTEM_RID || it->second.integrityLevel == SECURITY_MANDATORY_SYSTEM_RID)
 					wcout << "ATTENTION! PID is protected!" << endl;
 				if (sArgs.compare) {
-					if (it->second.codeMatch == -1)
+					if (it->second.codeMatch == -2)
+						wcout << "Codematch: WARNING! Could not open image file!  Does it exist?" << endl;
+					else if (it->second.codeMatch == -1)
 						wcout << "Codematch: WARNING! NON-MATCHING code segment. Bytes diff: " << it->second.codeDiffCnt << endl;
 					else if (it->second.codeMatch == 0)
 						wcout << "Codematch: Unable to validate code segment." << endl;

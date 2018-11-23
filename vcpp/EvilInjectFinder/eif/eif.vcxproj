@@ -138,7 +138,7 @@
     </Link>
     <PostBuildEvent>
       <Command>xcopy /y $(ProjectDir)sigs.txt  $(OutDir)
-xcopy /y $(OutDir)*.exe $(ProjectDir)..\..\..\binaries\v86\
+xcopy /y $(OutDir)*.exe $(ProjectDir)..\..\..\binaries\x86\
 xcopy /y $(OutDir)*.sys $(ProjectDir)..\..\..\binaries\v86\
 xcopy /y $(OutDir)sigs.txt $(ProjectDir)..\..\..\binaries\v86\</Command>
     </PostBuildEvent>
@@ -163,7 +163,7 @@ xcopy /y $(OutDir)sigs.txt $(ProjectDir)..\..\..\binaries\v86\</Command>
     </Link>
     <PostBuildEvent>
       <Command>xcopy /y $(ProjectDir)sigs.txt  $(OutDir)
-xcopy /y $(OutDir)*.exe $(ProjectDir)..\..\..\binaries\v64\
+xcopy /y $(OutDir)*.exe $(ProjectDir)..\..\..\binaries\x64\
 xcopy /y $(OutDir)*.sys $(ProjectDir)..\..\..\binaries\v64\
 xcopy /y $(OutDir)sigs.txt $(ProjectDir)..\..\..\binaries\v64\</Command>
     </PostBuildEvent>
